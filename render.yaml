@@ -1,0 +1,21 @@
+services:
+  - type: worker
+    name: crypto-discord-bot
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 24
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: CLIENT_ID
+        sync: false
+      - key: GUILD_ID
+        sync: false
+      - key: ALERT_CHANNEL_ID
+        sync: false
+      - key: DEFAULT_SYMBOLS
+        value: BTC/USDT,ETH/USDT,SOL/USDT
+      - key: ALERT_INTERVAL_CRON
+        value: "*/5 * * * *"
