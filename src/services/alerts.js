@@ -9,6 +9,8 @@ import {
   bollingerSignal,
   elliottWaveSignal,
   calcConsensus,
+  calcATR,
+  calcSLTP,
 } from './indicators.js';
 import { loadWatchList, saveWatchList, loadThreshold, saveThreshold } from './storage.js';
 
@@ -49,14 +51,17 @@ export async function analyzeSymbol(symbol, timeframe = '1h') {
     rsiSig.signal, emaSig.signal, macdSig.signal, elliottSig.signal,
   ]);
 
-  return { symbol, timeframe, ticker, rsiSig, emaSig, macdSig, elliottSig, bbSig, consensus, score };
+  const atr   = calcATR(candles);
+  const sltp  = calcSLTP(ticker.price, atr, consensus, elliottSig.detail?.wave3TargetRaw ?? null);
+
+  return { symbol, timeframe, ticker, rsiSig, emaSig, macdSig, elliottSig, bbSig, consensus, score, sltp };
 }
 
 /**
  * สร้าง Discord Embed สำหรับแสดงผลการวิเคราะห์
  */
 export function buildSignalEmbed(result) {
-  const { symbol, timeframe, ticker, rsiSig, emaSig, macdSig, elliottSig, bbSig, consensus, score } = result;
+  const { symbol, timeframe, ticker, rsiSig, emaSig, macdSig, elliottSig, bbSig, consensus, score, sltp } = result;
   const total = 4;
 
   const changeEmoji = ticker.change24h >= 0 ? '📈' : '📉';
@@ -85,9 +90,24 @@ export function buildSignalEmbed(result) {
       name: `🎯 สรุป (${score}/${total})`,
       value: `**${consensus}**`,
       inline: false,
-    })
-    .setFooter({ text: `Timeframe: ${timeframe ?? '1h'} • ${new Date().toLocaleString('th-TH')}` })
-    .setTimestamp();
+    });
+
+  // SL/TP
+  if (sltp) {
+    const dir  = sltp.direction === 'BUY' ? '🟢 BUY' : '🔴 SELL';
+    const sign = (pct) => pct > 0 ? `+${pct}%` : `${pct}%`;
+    embed.addFields({
+      name: `🛡️ SL / TP  [${dir}]  R:R = 1:${sltp.rr}`,
+      value: [
+        `📍 **Entry**  $${sltp.entry.market}  _(market)_   |   $${sltp.entry.limit}  _(limit zone)_`,
+        `🛑 **SL**     $${sltp.sl.price}  \`${sign(sltp.sl.pct)}\``,
+        `🎯 **TP1**    $${sltp.tp1.price}  \`${sign(sltp.tp1.pct)}\``,
+        `🎯 **TP2**    $${sltp.tp2.price}  \`${sign(sltp.tp2.pct)}\``,
+        `🎯 **TP3**    $${sltp.tp3.price}  \`${sign(sltp.tp3.pct)}\`${elliottSig.detail ? '  _(Elliott target)_' : ''}`,
+      ].join('\n'),
+      inline: false,
+    });
+  }
 
   // Elliott Wave detail
   if (elliottSig.detail) {
@@ -101,6 +121,10 @@ export function buildSignalEmbed(result) {
 
     embed.addFields({ name: '🌊 Elliott Detail', value: `\`\`\`${lines}\`\`\``, inline: false });
   }
+
+  embed
+    .setFooter({ text: `Timeframe: ${timeframe ?? '1h'} • ${new Date().toLocaleString('th-TH')}` })
+    .setTimestamp();
 
   return embed;
 }

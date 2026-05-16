@@ -213,6 +213,7 @@ export function elliottWaveSignal(candles) {
         wave2Low: fmt(p2.price),
         wave3Target: fmt(fib.wave3Target),
         wave3Ideal: fmt(fib.wave3Ideal),
+        wave3TargetRaw: fib.wave3Target,
         wave2Valid,
         currentPrice: fmt(currentPrice),
       },
@@ -236,12 +237,86 @@ export function elliottWaveSignal(candles) {
         wave2High: fmt(p2.price),
         wave3Target: fmt(fib.wave3Target),
         wave3Ideal: fmt(fib.wave3Ideal),
+        wave3TargetRaw: fib.wave3Target,
         currentPrice: fmt(currentPrice),
       },
     };
   }
 
   return { signal: 'NEUTRAL', label: '⚪ Elliott: ไม่พบรูปแบบคลื่นชัดเจน', detail: null };
+}
+
+// ─── ATR + SL/TP ─────────────────────────────────────────────────────────────
+
+/**
+ * คำนวณ ATR (Average True Range) — Wilder's smoothing
+ * @param {object[]} candles OHLCV
+ * @param {number}   period  default 14
+ */
+export function calcATR(candles, period = 14) {
+  if (candles.length < period + 1) return null;
+  const trs = [];
+  for (let i = 1; i < candles.length; i++) {
+    const { high, low } = candles[i];
+    const prevClose = candles[i - 1].close;
+    trs.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
+  }
+  // Initial ATR = SMA
+  let atr = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < trs.length; i++) {
+    atr = (atr * (period - 1) + trs[i]) / period;
+  }
+  return atr;
+}
+
+/**
+ * คำนวณ SL/TP จาก ATR
+ * @param {number}      price          ราคาปัจจุบัน
+ * @param {number}      atr            ATR(14)
+ * @param {string}      consensus      ผล consensus เช่น '⚡ Strong BUY'
+ * @param {number|null} elliottTarget  wave3 target (raw number) จาก Elliott Wave
+ */
+export function calcSLTP(price, atr, consensus, elliottTarget = null) {
+  if (!atr || (!consensus.includes('BUY') && !consensus.includes('SELL'))) return null;
+
+  const isBuy = consensus.includes('BUY');
+  const dp    = price < 1 ? 6 : price < 100 ? 4 : 2;
+  const fmt   = (n) => parseFloat(n.toFixed(dp));
+  const pct   = (n) => ((n - price) / price * 100).toFixed(2);
+
+  if (isBuy) {
+    const sl    = fmt(price - atr * 1.5);
+    const tp1   = fmt(price + atr * 2);
+    const tp2   = fmt(price + atr * 3);
+    const tp3   = elliottTarget ? fmt(elliottTarget) : fmt(price + atr * 4);
+    const rr    = ((tp1 - price) / (price - sl)).toFixed(2);
+    const entry = { market: fmt(price), limit: fmt(price - atr * 0.3) };
+    return {
+      direction: 'BUY',
+      entry,
+      sl:  { price: sl,  pct: pct(sl) },
+      tp1: { price: tp1, pct: pct(tp1) },
+      tp2: { price: tp2, pct: pct(tp2) },
+      tp3: { price: tp3, pct: pct(tp3) },
+      rr,
+    };
+  }
+
+  const sl    = fmt(price + atr * 1.5);
+  const tp1   = fmt(price - atr * 2);
+  const tp2   = fmt(price - atr * 3);
+  const tp3   = elliottTarget ? fmt(elliottTarget) : fmt(price - atr * 4);
+  const rr    = ((price - tp1) / (sl - price)).toFixed(2);
+  const entry = { market: fmt(price), limit: fmt(price + atr * 0.3) };
+  return {
+    direction: 'SELL',
+    entry,
+    sl:  { price: sl,  pct: pct(sl) },
+    tp1: { price: tp1, pct: pct(tp1) },
+    tp2: { price: tp2, pct: pct(tp2) },
+    tp3: { price: tp3, pct: pct(tp3) },
+    rr,
+  };
 }
 
 // ─── MACD ─────────────────────────────────────────────────────────────────────
