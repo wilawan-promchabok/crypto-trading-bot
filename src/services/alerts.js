@@ -61,69 +61,49 @@ export async function analyzeSymbol(symbol, timeframe = '1h') {
  * สร้าง Discord Embed สำหรับแสดงผลการวิเคราะห์
  */
 export function buildSignalEmbed(result) {
-  const { symbol, timeframe, ticker, rsiSig, emaSig, macdSig, elliottSig, bbSig, consensus, score, sltp } = result;
-  const total = 4;
+  const { symbol, timeframe, ticker, rsiSig, emaSig, macdSig, elliottSig, consensus, score, sltp } = result;
 
-  const changeEmoji = ticker.change24h >= 0 ? '📈' : '📉';
-  const changeSign  = ticker.change24h >= 0 ? '+' : '';
-  const price = ticker.price.toLocaleString('en-US', { maximumFractionDigits: 4 });
+  const changeSign = ticker.change24h >= 0 ? '+' : '';
+  const price      = ticker.price.toLocaleString('en-US', { maximumFractionDigits: 4 });
+  const change     = `${changeSign}${ticker.change24h?.toFixed(2)}%`;
+
+  const color = consensus.includes('BUY')  ? 0x00c87a :
+                consensus.includes('SELL') ? 0xff4444 : 0x888888;
+
+  // สรุป indicators ในบรรทัดเดียว
+  const indicatorLine = [
+    `RSI ${rsiSig.signal}`,
+    `EMA ${emaSig.signal.replace('HOLD_', '')}`,
+    `MACD ${macdSig.signal.replace('HOLD_', '')}`,
+    `Elliott ${elliottSig.signal}`,
+  ].join('  ·  ');
 
   const embed = new EmbedBuilder()
-    .setTitle(`${changeEmoji} ${symbol}`)
-    .setColor(
-      consensus.includes('BUY') ? 0x00c87a :
-      consensus.includes('SELL') ? 0xff4444 : 0x888888
-    )
-    .addFields(
-      {
-        name: '💰 ราคาปัจจุบัน',
-        value: `$${price}  (${changeSign}${ticker.change24h?.toFixed(2)}% 24h)`,
-        inline: false,
-      },
-      { name: '📊 RSI (14)',    value: rsiSig.label,     inline: true },
-      { name: '📉 EMA Cross',   value: emaSig.label,     inline: true },
-      { name: '📈 MACD',        value: macdSig.label,    inline: true },
-      { name: '🌊 Elliott Wave', value: elliottSig.label, inline: true },
-      { name: '📐 Bollinger',   value: bbSig.label,      inline: false },
-    )
+    .setTitle(`${symbol}  —  $${price}  (${change} 24h)`)
+    .setColor(color)
     .addFields({
-      name: `🎯 สรุป (${score}/${total})`,
-      value: `**${consensus}**`,
+      name: `Signal  ${score}/4`,
+      value: `**${consensus}**\n\`${indicatorLine}\``,
       inline: false,
     });
 
-  // SL/TP
   if (sltp) {
-    const dir  = sltp.direction === 'BUY' ? '🟢 BUY' : '🔴 SELL';
-    const sign = (pct) => pct > 0 ? `+${pct}%` : `${pct}%`;
+    const sign = (pct) => Number(pct) > 0 ? `+${pct}%` : `${pct}%`;
     embed.addFields({
-      name: `🛡️ SL / TP  [${dir}]  R:R = 1:${sltp.rr}`,
+      name: `${sltp.direction === 'BUY' ? 'Long' : 'Short'}  ·  R:R = 1:${sltp.rr}`,
       value: [
-        `📍 **Entry**  $${sltp.entry.market}  _(market)_   |   $${sltp.entry.limit}  _(limit zone)_`,
-        `🛑 **SL**     $${sltp.sl.price}  \`${sign(sltp.sl.pct)}\``,
-        `🎯 **TP1**    $${sltp.tp1.price}  \`${sign(sltp.tp1.pct)}\``,
-        `🎯 **TP2**    $${sltp.tp2.price}  \`${sign(sltp.tp2.pct)}\``,
-        `🎯 **TP3**    $${sltp.tp3.price}  \`${sign(sltp.tp3.pct)}\`${elliottSig.detail ? '  _(Elliott target)_' : ''}`,
+        `Entry   $${sltp.entry.market}  ·  Limit $${sltp.entry.limit}`,
+        `SL      $${sltp.sl.price}  (${sign(sltp.sl.pct)})`,
+        `TP1     $${sltp.tp1.price}  (${sign(sltp.tp1.pct)})`,
+        `TP2     $${sltp.tp2.price}  (${sign(sltp.tp2.pct)})`,
+        `TP3     $${sltp.tp3.price}  (${sign(sltp.tp3.pct)})`,
       ].join('\n'),
       inline: false,
     });
   }
 
-  // Elliott Wave detail
-  if (elliottSig.detail) {
-    const d = elliottSig.detail;
-    const lines = [
-      `Direction: ${d.direction}`,
-      `Wave 1: ${d.wave1Start} → ${d.wave1End}`,
-      d.wave3Target ? `Wave 3 Target: $${d.wave3Target}` : '',
-      d.wave3Ideal  ? `Wave 3 Ideal: $${d.wave3Ideal}`   : '',
-    ].filter(Boolean).join('\n');
-
-    embed.addFields({ name: '🌊 Elliott Detail', value: `\`\`\`${lines}\`\`\``, inline: false });
-  }
-
   embed
-    .setFooter({ text: `Timeframe: ${timeframe ?? '1h'} • ${new Date().toLocaleString('th-TH')}` })
+    .setFooter({ text: `${timeframe ?? '1h'}  ·  ${new Date().toLocaleString('th-TH')}` })
     .setTimestamp();
 
   return embed;
