@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 
 const DATA_DIR = join(process.cwd(), 'data');
@@ -51,4 +51,35 @@ export function saveThreshold(value) {
   const s = readSettings();
   s.threshold = value;
   writeJSON('settings.json', s);
+}
+
+// ─── Guild configs (multi-server) ─────────────────────────────────────────────
+
+const GUILDS_DIR = join(DATA_DIR, 'guilds');
+
+function ensureGuildsDir() {
+  if (!existsSync(GUILDS_DIR)) mkdirSync(GUILDS_DIR, { recursive: true });
+}
+
+export function loadGuildConfig(guildId) {
+  const path = join(GUILDS_DIR, `${guildId}.json`);
+  if (!existsSync(path)) return null;
+  try { return JSON.parse(readFileSync(path, 'utf8')); }
+  catch { return null; }
+}
+
+export function saveGuildConfig(guildId, config) {
+  ensureGuildsDir();
+  writeFileSync(join(GUILDS_DIR, `${guildId}.json`), JSON.stringify(config, null, 2), 'utf8');
+}
+
+export function getAllGuildConfigs() {
+  ensureGuildsDir();
+  return readdirSync(GUILDS_DIR)
+    .filter((f) => f.endsWith('.json'))
+    .map((f) => {
+      try { return JSON.parse(readFileSync(join(GUILDS_DIR, f), 'utf8')); }
+      catch { return null; }
+    })
+    .filter(Boolean);
 }

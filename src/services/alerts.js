@@ -12,23 +12,53 @@ import {
   calcATR,
   calcSLTP,
 } from './indicators.js';
-import { loadWatchList, saveWatchList, loadThreshold, saveThreshold } from './storage.js';
+import { loadWatchList, loadThreshold, loadGuildConfig, saveGuildConfig, getAllGuildConfigs } from './storage.js';
 
-// ─── Watchlist (loaded from disk, fallback to env) ────────────────────────────
-export const watchList = loadWatchList();
-export { saveWatchList };
+// ─── Per-guild config helpers ──────────────────────────────────────────────────
 
-// ─── Alert threshold ──────────────────────────────────────────────────────────
-let alertThreshold = loadThreshold();
-
-export function getAlertThreshold() { return alertThreshold; }
-export function setAlertThreshold(value) {
-  alertThreshold = value;
-  saveThreshold(value);
+function defaultGuildConfig(guildId) {
+  // Auto-migrate env/file config for the original guild
+  const isMigratingGuild = guildId === process.env.GUILD_ID;
+  return {
+    guildId,
+    alertChannelId: isMigratingGuild ? (process.env.ALERT_CHANNEL_ID || null) : null,
+    watchlist: isMigratingGuild ? [...loadWatchList()] : ['BTC/USDT', 'ETH/USDT'],
+    threshold: isMigratingGuild ? loadThreshold() : 2,
+  };
 }
 
-// ─── Deduplication: จำ consensus ล่าสุดของแต่ละ symbol ─────────────────────
-const lastConsensus = new Map();
+export function getGuildConfig(guildId) {
+  return loadGuildConfig(guildId) ?? defaultGuildConfig(guildId);
+}
+
+export function getGuildWatchList(guildId) {
+  return new Set(getGuildConfig(guildId).watchlist);
+}
+
+export function saveGuildWatchList(guildId, set) {
+  const config = getGuildConfig(guildId);
+  config.watchlist = [...set];
+  saveGuildConfig(guildId, config);
+}
+
+export function getGuildThreshold(guildId) {
+  return getGuildConfig(guildId).threshold ?? 2;
+}
+
+export function setGuildThreshold(guildId, value) {
+  const config = getGuildConfig(guildId);
+  config.threshold = value;
+  saveGuildConfig(guildId, config);
+}
+
+export function setGuildAlertChannel(guildId, channelId) {
+  const config = getGuildConfig(guildId);
+  config.alertChannelId = channelId;
+  saveGuildConfig(guildId, config);
+}
+
+// ─── Deduplication per guild ───────────────────────────────────────────────────
+const lastConsensusPerGuild = new Map(); // Map<guildId, Map<symbol, consensus>>
 
 /**
  * วิเคราะห์ symbol แล้วคืน object ผลลัพธ์
@@ -110,29 +140,47 @@ export function buildSignalEmbed(result) {
 }
 
 /**
- * ส่ง alert เฉพาะเมื่อสัญญาณถึง threshold และ consensus เปลี่ยนจากรอบที่แล้ว
+ * ส่ง alert ไปยังทุก guild ที่มีการตั้งค่า alertChannelId ไว้
  */
 export async function sendAlerts(timeframe = '1h') {
-  const channelId = process.env.ALERT_CHANNEL_ID;
-  if (!channelId) return;
+  let guildConfigs = getAllGuildConfigs();
 
-  const channel = await client.channels.fetch(channelId).catch(() => null);
-  if (!channel) return;
+  // Backward compat: ถ้ายังไม่มี guild configs ให้ใช้ env vars
+  if (guildConfigs.length === 0) {
+    const channelId = process.env.ALERT_CHANNEL_ID;
+    const guildId   = process.env.GUILD_ID;
+    if (!channelId || !guildId) return;
+    guildConfigs = [defaultGuildConfig(guildId)];
+    guildConfigs[0].alertChannelId = channelId;
+  }
 
-  for (const symbol of watchList) {
-    try {
-      const result = await analyzeSymbol(symbol, timeframe);
+  for (const config of guildConfigs) {
+    if (!config.alertChannelId || !config.watchlist?.length) continue;
 
-      if (result.score < alertThreshold) continue;
+    const channel = await client.channels.fetch(config.alertChannelId).catch(() => null);
+    if (!channel) continue;
 
-      const prev = lastConsensus.get(symbol);
-      if (prev === result.consensus) continue;   // dedup: ไม่ส่งซ้ำ
+    if (!lastConsensusPerGuild.has(config.guildId)) {
+      lastConsensusPerGuild.set(config.guildId, new Map());
+    }
+    const lastConsensus = lastConsensusPerGuild.get(config.guildId);
+    const threshold = config.threshold ?? 2;
 
-      lastConsensus.set(symbol, result.consensus);
-      const embed = buildSignalEmbed(result);
-      await channel.send({ embeds: [embed] });
-    } catch (err) {
-      console.error(`[alerts] ${symbol}:`, err.message);
+    for (const symbol of config.watchlist) {
+      try {
+        const result = await analyzeSymbol(symbol, timeframe);
+
+        if (result.score < threshold) continue;
+
+        const prev = lastConsensus.get(symbol);
+        if (prev === result.consensus) continue; // dedup
+
+        lastConsensus.set(symbol, result.consensus);
+        const embed = buildSignalEmbed(result);
+        await channel.send({ embeds: [embed] });
+      } catch (err) {
+        console.error(`[alerts] ${config.guildId}/${symbol}:`, err.message);
+      }
     }
   }
 }

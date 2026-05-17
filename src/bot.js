@@ -3,10 +3,12 @@ import { client } from './client.js';
 import { priceCommand } from './commands/price.js';
 import { watchCommand } from './commands/watch.js';
 import { pingCommand } from './commands/ping.js';
+import { setupCommand } from './commands/setup.js';
 
 client.commands.set(priceCommand.data.name, priceCommand);
 client.commands.set(watchCommand.data.name, watchCommand);
 client.commands.set(pingCommand.data.name, pingCommand);
+client.commands.set(setupCommand.data.name, setupCommand);
 
 client.once('ready', () => {
   console.log(`✅ Bot ready: ${client.user.tag}`);

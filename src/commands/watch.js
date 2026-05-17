@@ -1,5 +1,5 @@
 import { SlashCommandBuilder } from 'discord.js';
-import { watchList, saveWatchList, getAlertThreshold, setAlertThreshold } from '../services/alerts.js';
+import { getGuildWatchList, saveGuildWatchList, getGuildThreshold, setGuildThreshold } from '../services/alerts.js';
 import { validateSymbol } from '../services/exchange.js';
 
 export const watchCommand = {
@@ -38,11 +38,16 @@ export const watchCommand = {
     ),
 
   async execute(interaction) {
+    const guildId = interaction.guildId;
+    if (!guildId) {
+      return interaction.reply({ content: '❌ ต้องใช้คำสั่งนี้ใน server เท่านั้น', ephemeral: true });
+    }
+
     const sub = interaction.options.getSubcommand();
 
     if (sub === 'list') {
-      const list = [...watchList];
-      const threshold = getAlertThreshold();
+      const list = [...getGuildWatchList(guildId)];
+      const threshold = getGuildThreshold(guildId);
       if (list.length === 0) {
         return interaction.reply(`📋 Watchlist ว่างเปล่า\n🔔 Alert threshold: **${threshold}/4**`);
       }
@@ -60,26 +65,28 @@ export const watchCommand = {
       if (!valid) {
         return interaction.editReply(`❌ ไม่พบ **${symbol}** บน Binance กรุณาตรวจสอบ symbol อีกครั้ง`);
       }
+      const watchList = getGuildWatchList(guildId);
       watchList.add(symbol);
-      saveWatchList(watchList);
+      saveGuildWatchList(guildId, watchList);
       return interaction.editReply(`✅ เพิ่ม **${symbol}** เข้า watchlist แล้ว (รวม ${watchList.size} symbols)`);
     }
 
     if (sub === 'remove') {
+      const watchList = getGuildWatchList(guildId);
       if (!watchList.has(symbol)) {
         return interaction.reply(`⚠️ ไม่พบ **${symbol}** ใน watchlist`);
       }
       watchList.delete(symbol);
-      saveWatchList(watchList);
+      saveGuildWatchList(guildId, watchList);
       return interaction.reply(`🗑️ ลบ **${symbol}** ออกจาก watchlist แล้ว`);
     }
 
     if (sub === 'threshold') {
       const value = interaction.options.getInteger('value');
       if (value === null) {
-        return interaction.reply(`🔔 Alert threshold ปัจจุบัน: **${getAlertThreshold()}/4**`);
+        return interaction.reply(`🔔 Alert threshold ปัจจุบัน: **${getGuildThreshold(guildId)}/4**`);
       }
-      setAlertThreshold(value);
+      setGuildThreshold(guildId, value);
       return interaction.reply(`✅ ตั้ง alert threshold เป็น **${value}/4** แล้ว`);
     }
   },
